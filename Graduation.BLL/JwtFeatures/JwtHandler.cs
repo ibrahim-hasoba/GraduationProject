@@ -51,12 +51,13 @@ namespace Graduation.BLL.JwtFeatures
             return claims;
         }
 
+        // REPLACE the GenerateTokenOptions method with this:
         private JwtSecurityToken GenerateTokenOptions(SigningCredentials signingCredentials, List<Claim> claims)
         {
-            // FIXED: Changed from "expiresInMinutes" to "expiryInMinutes" to match appsettings.json
+            // Changed from 5 minutes to 1 hour for better UX
             var expiryMinutes = _jwtSetting["expiryInMinutes"];
             var expiry = string.IsNullOrEmpty(expiryMinutes)
-                ? DateTime.UtcNow.AddMinutes(60)
+                ? DateTime.UtcNow.AddHours(1)  // Changed from 60 minutes to 1 hour
                 : DateTime.UtcNow.AddMinutes(Convert.ToDouble(expiryMinutes));
 
             var tokenOptions = new JwtSecurityToken(

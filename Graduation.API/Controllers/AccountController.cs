@@ -6,7 +6,9 @@ using Graduation.DAL.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.WebUtilities;
+using Shared.DTOs;
 using Shared.DTOs.Auth;
 using System.Text;
 
@@ -20,7 +22,7 @@ namespace Graduation.API.Controllers
         private readonly JwtHandler _jwtHandler;
         private readonly IEmailService _emailService;
         private readonly IConfiguration _configuration;
-
+        private readonly IRefreshTokenService _refreshTokenService;
         private readonly IFacebookAuthService _facebookAuthService;
 
         public AccountController(
@@ -28,18 +30,21 @@ namespace Graduation.API.Controllers
             JwtHandler jwtHandler,
             IEmailService emailService,
             IConfiguration configuration,
-            IFacebookAuthService facebookAuthService)
+            IFacebookAuthService facebookAuthService, 
+            IRefreshTokenService refreshTokenService)
         {
             _userManager = userManager;
             _jwtHandler = jwtHandler;
             _emailService = emailService;
             _configuration = configuration;
             _facebookAuthService = facebookAuthService;
+            _refreshTokenService = refreshTokenService;
         }
 
         /// <summary>
         /// Register a new user
         /// </summary>
+        [EnableRateLimiting("auth")]
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] UserForRegisterDto userForRegistration)
         {
@@ -143,6 +148,7 @@ namespace Graduation.API.Controllers
         /// <summary>
         /// Resend verification email
         /// </summary>
+        [EnableRateLimiting("auth")]
         [HttpPost("resend-verification")]
         public async Task<IActionResult> ResendVerificationEmail([FromBody] ResendVerificationDto dto)
         {
@@ -174,6 +180,7 @@ namespace Graduation.API.Controllers
         /// <summary>
         /// Login with email and password
         /// </summary>
+        [EnableRateLimiting("auth")]
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] UserForLoginDto userForAuthentication)
         {
@@ -190,15 +197,25 @@ namespace Graduation.API.Controllers
                 throw new UnauthorizedException("Please verify your email before logging in. Check your inbox for the verification link.");
 
             var roles = await _userManager.GetRolesAsync(user);
-            var token = _jwtHandler.CreateToken(user, roles);
+            var accessToken = _jwtHandler.CreateToken(user, roles);
+
+            // Generate refresh token
+            var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var refreshToken = await _refreshTokenService.GenerateRefreshTokenAsync(user.Id, ipAddress);
 
             return Ok(new
             {
                 success = true,
                 message = "Login successful",
-                data = new
+                data = new TokenResponseDto
                 {
-                    token = token,
+                    AccessToken = accessToken,
+                    RefreshToken = refreshToken.Token,
+                    ExpiresIn = 3600, // 1 hour in seconds
+                    TokenType = "Bearer"
+                },
+                user = new
+                {
                     email = user.Email,
                     firstName = user.FirstName,
                     lastName = user.LastName,
@@ -208,8 +225,69 @@ namespace Graduation.API.Controllers
             });
         }
         /// <summary>
+        /// Refresh access token
+        /// </summary>
+        [HttpPost("refresh-token")]
+        public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenDto dto)
+        {
+            var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+            // Validate refresh token
+            if (!await _refreshTokenService.ValidateRefreshTokenAsync(dto.RefreshToken))
+                throw new UnauthorizedException("Invalid or expired refresh token");
+
+            var refreshToken = await _refreshTokenService.GetRefreshTokenAsync(dto.RefreshToken);
+            if (refreshToken == null)
+                throw new UnauthorizedException("Invalid refresh token");
+
+            var user = await _userManager.FindByIdAsync(refreshToken.UserId);
+            if (user == null)
+                throw new NotFoundException("User not found");
+
+            // Generate new tokens
+            var roles = await _userManager.GetRolesAsync(user);
+            var newAccessToken = _jwtHandler.CreateToken(user, roles);
+            var newRefreshToken = await _refreshTokenService.GenerateRefreshTokenAsync(user.Id, ipAddress);
+
+            // Revoke old refresh token
+            await _refreshTokenService.RevokeTokenAsync(dto.RefreshToken, ipAddress, newRefreshToken.Token);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Token refreshed successfully",
+                data = new TokenResponseDto
+                {
+                    AccessToken = newAccessToken,
+                    RefreshToken = newRefreshToken.Token,
+                    ExpiresIn = 3600,
+                    TokenType = "Bearer"
+                }
+            });
+        }
+        /// <summary>
+        /// Revoke refresh token (logout)
+        /// </summary>
+        [HttpPost("revoke-token")]
+        [Authorize]
+        public async Task<IActionResult> RevokeToken([FromBody] RefreshTokenDto dto)
+        {
+            var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+            try
+            {
+                await _refreshTokenService.RevokeTokenAsync(dto.RefreshToken, ipAddress);
+                return Ok(new { success = true, message = "Token revoked successfully" });
+            }
+            catch (BadRequestException)
+            {
+                throw new BadRequestException("Invalid token");
+            }
+        }
+        /// <summary>
         /// Login with Facebook
         /// </summary>
+        [EnableRateLimiting("auth")]
         [HttpPost("facebook-login")]
         public async Task<IActionResult> FacebookLogin([FromBody] FacebookLoginDto dto)
         {
@@ -240,7 +318,6 @@ namespace Graduation.API.Controllers
                     FirstName = firstName,
                     LastName = lastName,
                     EmailConfirmed = true, // Facebook emails are verified
-                                           // Optional: Save Facebook profile picture URL
                 };
 
                 var result = await _userManager.CreateAsync(user);
@@ -254,22 +331,32 @@ namespace Graduation.API.Controllers
                 await _userManager.AddToRoleAsync(user, "Customer");
             }
 
-            // Generate JWT token
+            // Generate JWT token and refresh token
             var roles = await _userManager.GetRolesAsync(user);
-            var token = _jwtHandler.CreateToken(user, roles);
+            var accessToken = _jwtHandler.CreateToken(user, roles);
+
+            // Generate refresh token (THIS WAS MISSING)
+            var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var refreshToken = await _refreshTokenService.GenerateRefreshTokenAsync(user.Id, ipAddress);
 
             return Ok(new
             {
                 success = true,
                 message = "Facebook login successful",
-                data = new
+                data = new TokenResponseDto  // Changed to use TokenResponseDto
                 {
-                    token = token,
+                    AccessToken = accessToken,
+                    RefreshToken = refreshToken.Token,
+                    ExpiresIn = 3600,
+                    TokenType = "Bearer"
+                },
+                user = new
+                {
                     email = user.Email,
                     firstName = user.FirstName,
                     lastName = user.LastName,
                     roles = roles,
-                    isNewUser = user.CreatedAt > DateTime.UtcNow.AddMinutes(-1) // Just created
+                    isNewUser = user.CreatedAt > DateTime.UtcNow.AddMinutes(-1)
                 }
             });
         }
