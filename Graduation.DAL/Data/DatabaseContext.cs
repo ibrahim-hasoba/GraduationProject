@@ -36,6 +36,14 @@ namespace Graduation.DAL.Data
                 entity.HasIndex(v => v.StoreName).IsUnique();
                 entity.Property(v => v.StoreName).IsRequired().HasMaxLength(200);
                 entity.Property(v => v.PhoneNumber).IsRequired().HasMaxLength(20);
+
+                // Performance Indexes
+                entity.HasIndex(v => v.UserId);
+                entity.HasIndex(v => v.IsApproved);
+                entity.HasIndex(v => v.IsActive);
+                entity.HasIndex(v => new { v.IsApproved, v.IsActive });
+                entity.HasIndex(v => v.Governorate);
+                entity.HasIndex(v => v.CreatedAt);
             });
 
             // Category Configuration
@@ -50,6 +58,11 @@ namespace Graduation.DAL.Data
 
                 entity.Property(c => c.NameAr).IsRequired().HasMaxLength(200);
                 entity.Property(c => c.NameEn).IsRequired().HasMaxLength(200);
+
+                // Performance Indexes
+                entity.HasIndex(c => c.IsActive);
+                entity.HasIndex(c => c.ParentCategoryId);
+                entity.HasIndex(c => new { c.IsActive, c.ParentCategoryId });
             });
 
             // Product Configuration
@@ -74,6 +87,25 @@ namespace Graduation.DAL.Data
                     .OnDelete(DeleteBehavior.Restrict);
 
                 entity.HasIndex(p => p.SKU).IsUnique();
+
+                // Performance Indexes for Search and Filtering
+                entity.HasIndex(p => p.IsActive);
+                entity.HasIndex(p => p.CategoryId);
+                entity.HasIndex(p => p.VendorId);
+                entity.HasIndex(p => p.Price);
+                entity.HasIndex(p => p.IsFeatured);
+                entity.HasIndex(p => p.IsEgyptianMade);
+                entity.HasIndex(p => p.StockQuantity);
+                entity.HasIndex(p => p.CreatedAt);
+                entity.HasIndex(p => p.ViewCount);
+
+                // Composite Indexes for Common Queries
+                entity.HasIndex(p => new { p.IsActive, p.CategoryId });
+                entity.HasIndex(p => new { p.IsActive, p.VendorId });
+                entity.HasIndex(p => new { p.IsActive, p.IsFeatured });
+                entity.HasIndex(p => new { p.IsActive, p.Price });
+                entity.HasIndex(p => new { p.CategoryId, p.IsActive, p.Price });
+                entity.HasIndex(p => new { p.VendorId, p.IsActive, p.CreatedAt });
             });
 
             // Product Image Configuration
@@ -87,6 +119,11 @@ namespace Graduation.DAL.Data
                     .OnDelete(DeleteBehavior.Cascade);
 
                 entity.Property(pi => pi.ImageUrl).IsRequired();
+
+                // Performance Indexes
+                entity.HasIndex(pi => pi.ProductId);
+                entity.HasIndex(pi => new { pi.ProductId, pi.IsPrimary });
+                entity.HasIndex(pi => new { pi.ProductId, pi.DisplayOrder });
             });
 
             // Product Review Configuration
@@ -105,6 +142,14 @@ namespace Graduation.DAL.Data
                     .OnDelete(DeleteBehavior.Restrict);
 
                 entity.Property(pr => pr.Rating).IsRequired();
+
+                // Performance Indexes
+                entity.HasIndex(pr => pr.ProductId);
+                entity.HasIndex(pr => pr.UserId);
+                entity.HasIndex(pr => pr.IsApproved);
+                entity.HasIndex(pr => pr.CreatedAt);
+                entity.HasIndex(pr => new { pr.ProductId, pr.IsApproved });
+                entity.HasIndex(pr => new { pr.UserId, pr.ProductId }).IsUnique();
             });
 
             // Cart Item Configuration
@@ -123,6 +168,11 @@ namespace Graduation.DAL.Data
                     .OnDelete(DeleteBehavior.Restrict);
 
                 entity.HasIndex(ci => new { ci.UserId, ci.ProductId }).IsUnique();
+
+                // Performance Indexes
+                entity.HasIndex(ci => ci.UserId);
+                entity.HasIndex(ci => ci.ProductId);
+                entity.HasIndex(ci => ci.AddedAt);
             });
 
             // Order Configuration
@@ -147,6 +197,21 @@ namespace Graduation.DAL.Data
                     .OnDelete(DeleteBehavior.Restrict);
 
                 entity.HasIndex(o => o.OrderNumber).IsUnique();
+
+                // Performance Indexes
+                entity.HasIndex(o => o.UserId);
+                entity.HasIndex(o => o.VendorId);
+                entity.HasIndex(o => o.Status);
+                entity.HasIndex(o => o.PaymentStatus);
+                entity.HasIndex(o => o.OrderDate);
+                entity.HasIndex(o => o.ShippingGovernorate);
+
+                // Composite Indexes for Common Queries
+                entity.HasIndex(o => new { o.UserId, o.OrderDate });
+                entity.HasIndex(o => new { o.VendorId, o.Status });
+                entity.HasIndex(o => new { o.Status, o.OrderDate });
+                entity.HasIndex(o => new { o.UserId, o.Status, o.OrderDate });
+                entity.HasIndex(o => new { o.VendorId, o.Status, o.OrderDate });
             });
 
             // Order Item Configuration
@@ -166,7 +231,13 @@ namespace Graduation.DAL.Data
                     .WithMany(p => p.OrderItems)
                     .HasForeignKey(oi => oi.ProductId)
                     .OnDelete(DeleteBehavior.Restrict);
+
+                // Performance Indexes
+                entity.HasIndex(oi => oi.OrderId);
+                entity.HasIndex(oi => oi.ProductId);
             });
+
+            // RefreshToken Configuration
             builder.Entity<RefreshToken>(entity =>
             {
                 entity.HasKey(rt => rt.Id);
@@ -177,8 +248,13 @@ namespace Graduation.DAL.Data
                     .OnDelete(DeleteBehavior.Cascade);
 
                 entity.HasIndex(rt => rt.Token).IsUnique();
-                entity.HasIndex(rt => rt.UserId);
                 entity.Property(rt => rt.Token).IsRequired().HasMaxLength(200);
+
+                // Performance Indexes
+                entity.HasIndex(rt => rt.UserId);
+                entity.HasIndex(rt => rt.ExpiresAt);
+                entity.HasIndex(rt => rt.IsRevoked);
+                entity.HasIndex(rt => new { rt.UserId, rt.IsRevoked, rt.ExpiresAt });
             });
 
             // Seed Egyptian Categories

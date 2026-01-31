@@ -169,8 +169,8 @@ namespace Graduation.API
                 builder.Services.AddScoped<IReviewService, ReviewService>();
                 builder.Services.AddScoped<IAdminService, AdminService>();
                 builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
-                
-
+                builder.Services.AddEndpointsApiExplorer();
+                //builder.Services.AddSwaggerDocumentation();
                 // Register Facebook Auth Service with HttpClient
                 builder.Services.AddHttpClient<IFacebookAuthService, FacebookAuthService>();
 
@@ -234,7 +234,7 @@ namespace Graduation.API
 
                 app.UseHttpsRedirection();
                 app.UseCors("AllowSpecificOrigins");  // Changed from "AllowAll"
-                app.UseRateLimiter();
+                //app.UseRateLimiter();
                 app.UseAuthentication();
                 app.UseAuthorization();
                 app.MapControllers();
