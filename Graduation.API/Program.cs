@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using Serilog;
 using System.Text;
 using System.Threading.RateLimiting;
@@ -38,116 +39,60 @@ namespace Graduation.API
 
             try
             {
-                Log.Information("Starting Egyptian Marketplace API (.NET 10)");
+                Log.Information("Starting Egyptian Marketplace API (.NET 8)");
 
                 var builder = WebApplication.CreateBuilder(args);
 
                 // Use Serilog
                 builder.Host.UseSerilog();
 
-                // CRITICAL FIX: Enable Rate Limiting
-                //builder.Services.AddRateLimiter(options =>
-                //{
-                //    // Global rate limit: 100 requests per minute per user/IP
-                //    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-                //    {
-                //        var username = context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
-
-                //        return RateLimitPartition.GetFixedWindowLimiter(
-                //            partitionKey: username,
-                //            factory: partition => new FixedWindowRateLimiterOptions
-                //            {
-                //                AutoReplenishment = true,
-                //                PermitLimit = 100,
-                //                Window = TimeSpan.FromMinutes(1)
-                //            });
-                //    });
-
-                //    // Strict rate limit for authentication endpoints: 5 requests per minute
-                //    options.AddFixedWindowLimiter("auth", limiterOptions =>
-                //    {
-                //        limiterOptions.PermitLimit = 5;
-                //        limiterOptions.Window = TimeSpan.FromMinutes(1);
-                //        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-                //        limiterOptions.QueueLimit = 0;
-                //    });
-
-                //    // Rate limit for file uploads: 10 per minute
-                //    options.AddFixedWindowLimiter("upload", limiterOptions =>
-                //    {
-                //        limiterOptions.PermitLimit = 10;
-                //        limiterOptions.Window = TimeSpan.FromMinutes(1);
-                //        limiterOptions.QueueLimit = 0;
-                //    });
-
-                //    options.OnRejected = async (context, cancellationToken) =>
-                //    {
-                //        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                //        await context.HttpContext.Response.WriteAsJsonAsync(new
-                //        {
-                //            success = false,
-                //            message = "Too many requests. Please try again later.",
-                //            retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
-                //                ? retryAfter.TotalSeconds
-                //                : null
-                //        }, cancellationToken: cancellationToken);
-                //    };
-                //});
-
                 // Add services
                 builder.Services.AddControllers();
                 builder.Services.AddEndpointsApiExplorer();
 
-                // Configure Swagger with file upload support (.NET 10 compatible)
-                //builder.Services.AddSwaggerGen(options =>
-                //{
-                //    options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
-                //    {
-                //        Title = "Egyptian Marketplace API",
-                //        Version = "v1",
-                //        Description = "E-commerce API for Egyptian marketplace with vendor support (.NET 10)"
-                //    });
+                // Configure Swagger - .NET 8 compatible version
+                builder.Services.AddSwaggerGen(options =>
+                {
+                    options.SwaggerDoc("v1", new OpenApiInfo
+                    {
+                        Title = "Egyptian Marketplace API",
+                        Version = "v1",
+                        Description = "E-commerce API for Egyptian marketplace with vendor support (.NET 8)"
+                    });
 
-                //    // Add JWT Authentication to Swagger
-                //    options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-                //    {
-                //        Name = "Authorization",
-                //        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
-                //        Scheme = "Bearer",
-                //        BearerFormat = "JWT",
-                //        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-                //        Description = "JWT Authorization header using the Bearer scheme. Enter your token in the text input below."
-                //    });
+                    // Add JWT Authentication to Swagger
+                    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+                    {
+                        Name = "Authorization",
+                        Type = SecuritySchemeType.Http,
+                        Scheme = "Bearer",
+                        BearerFormat = "JWT",
+                        In = ParameterLocation.Header,
+                        Description = "JWT Authorization header using the Bearer scheme. Enter your token in the text input below."
+                    });
 
-                //    options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
-                //    {
-                //        {
-                //            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-                //            {
-                //                Reference = new Microsoft.OpenApi.Models.OpenApiReference
-                //                {
-                //                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
-                //                    Id = "Bearer"
-                //                }
-                //            },
-                //            Array.Empty<string>()
-                //        }
-                //    });
+                    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+                    {
+                        {
+                            new OpenApiSecurityScheme
+                            {
+                                Reference = new OpenApiReference
+                                {
+                                    Type = ReferenceType.SecurityScheme,
+                                    Id = "Bearer"
+                                }
+                            },
+                            Array.Empty<string>()
+                        }
+                    });
 
-                //    // Enable file upload support in Swagger
-                //    options.MapType<IFormFile>(() => new Microsoft.OpenApi.Models.OpenApiSchema
-                //    {
-                //        Type = "string",
-                //        Format = "binary"
-                //    });
-                //});
-
-                // NEW: Add Health Checks
-                //builder.Services.AddHealthChecks()
-                //    .AddDbContextCheck<DatabaseContext>("database")
-                //    .AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy());
-
-
+                    // Enable file upload support in Swagger
+                    options.MapType<IFormFile>(() => new OpenApiSchema
+                    {
+                        Type = "string",
+                        Format = "binary"
+                    });
+                });
 
                 // Database Configuration
                 builder.Services.AddDbContext<DatabaseContext>(options =>
@@ -218,7 +163,7 @@ namespace Graduation.API
                 builder.Services.AddScoped<IReviewService, ReviewService>();
                 builder.Services.AddScoped<IAdminService, AdminService>();
                 builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
-                builder.Services.AddScoped<IImageService, ImageService>(); // NEW
+                builder.Services.AddScoped<IImageService, ImageService>();
 
                 // Register Facebook Auth Service with HttpClient
                 builder.Services.AddHttpClient<IFacebookAuthService, FacebookAuthService>();
@@ -272,13 +217,13 @@ namespace Graduation.API
                 // Configure middleware pipeline
                 app.UseMiddleware<ExceptionMiddleware>();
 
-                // NEW: Security Headers
+                // Security Headers
                 app.Use(async (context, next) =>
                 {
-                    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
-                    context.Response.Headers.Append("X-Frame-Options", "DENY");
-                    context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
-                    context.Response.Headers.Append("Referrer-Policy", "no-referrer");
+                    context.Response.Headers.Add("X-Content-Type-Options", "nosniff");
+                    context.Response.Headers.Add("X-Frame-Options", "DENY");
+                    context.Response.Headers.Add("X-XSS-Protection", "1; mode=block");
+                    context.Response.Headers.Add("Referrer-Policy", "no-referrer");
                     await next();
                 });
 
@@ -291,17 +236,12 @@ namespace Graduation.API
                     });
                 }
 
-                // NEW: Map Health Checks
-                //app.MapHealthChecks("/health");
-                //app.MapHealthChecks("/health/ready");
-
                 app.UseHttpsRedirection();
 
                 // Enable static files for image uploads
                 app.UseStaticFiles();
 
                 app.UseCors("AllowSpecificOrigins");
-                //app.UseRateLimiter(); // ENABLED
                 app.UseAuthentication();
                 app.UseAuthorization();
                 app.MapControllers();
