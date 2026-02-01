@@ -4,20 +4,36 @@ using Graduation.BLL.Services.Interfaces;
 using Graduation.DAL.Data;
 using Graduation.DAL.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Graduation.BLL.Services.Implementations
 {
     public class VendorService : IVendorService
     {
         private readonly DatabaseContext _context;
+        private readonly IEmailService _emailService;
+        private readonly ILogger<VendorService> _logger;
 
-        public VendorService(DatabaseContext context)
+        public VendorService(
+            DatabaseContext context,
+            IEmailService emailService,
+            ILogger<VendorService> logger)
         {
             _context = context;
+            _emailService = emailService;
+            _logger = logger;
         }
 
         public async Task<VendorDto> RegisterVendorAsync(string userId, VendorRegisterDto dto)
         {
+            // CRITICAL FIX: Verify user exists and email is confirmed
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null)
+                throw new NotFoundException("User not found");
+
+            if (!user.EmailConfirmed)
+                throw new UnauthorizedException("Email must be verified before registering as a vendor. Please check your inbox for the verification link.");
+
             // Check if user already has a vendor account
             var existingVendor = await _context.Vendors
                 .FirstOrDefaultAsync(v => v.UserId == userId);
@@ -52,6 +68,9 @@ namespace Graduation.BLL.Services.Implementations
 
             _context.Vendors.Add(vendor);
             await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Vendor registration submitted: {StoreName} by user {UserId}",
+                dto.StoreName, userId);
 
             return await GetVendorByIdAsync(vendor.Id);
         }
@@ -145,12 +164,16 @@ namespace Graduation.BLL.Services.Implementations
 
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("Vendor updated: {VendorId} - {StoreName}", id, dto.StoreName);
+
             return await GetVendorByIdAsync(id);
         }
 
         public async Task<VendorDto> ApproveVendorAsync(int id, bool isApproved, string? rejectionReason = null)
         {
-            var vendor = await _context.Vendors.FindAsync(id);
+            var vendor = await _context.Vendors
+                .Include(v => v.User)
+                .FirstOrDefaultAsync(v => v.Id == id);
 
             if (vendor == null)
                 throw new NotFoundException("Vendor", id);
@@ -158,10 +181,30 @@ namespace Graduation.BLL.Services.Implementations
             vendor.IsApproved = isApproved;
             vendor.UpdatedAt = DateTime.UtcNow;
 
-            // TODO: You might want to send email notification here
-            // await _emailService.SendVendorApprovalEmail(vendor, isApproved, rejectionReason);
-
             await _context.SaveChangesAsync();
+
+            // Send notification email
+            if (vendor.User != null && !string.IsNullOrEmpty(vendor.User.Email))
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _emailService.SendVendorApprovalEmailAsync(
+                            vendor.User.Email,
+                            vendor.StoreName,
+                            isApproved,
+                            rejectionReason);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to send vendor approval email to {Email}", vendor.User.Email);
+                    }
+                });
+            }
+
+            _logger.LogInformation("Vendor {VendorId} approval status changed to {IsApproved}",
+                id, isApproved);
 
             return await GetVendorByIdAsync(id);
         }
@@ -178,6 +221,9 @@ namespace Graduation.BLL.Services.Implementations
 
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("Vendor {VendorId} active status toggled to {IsActive}",
+                id, vendor.IsActive);
+
             return await GetVendorByIdAsync(id);
         }
 
@@ -190,6 +236,8 @@ namespace Graduation.BLL.Services.Implementations
 
             _context.Vendors.Remove(vendor);
             await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Vendor deleted: {VendorId} - {StoreName}", id, vendor.StoreName);
         }
 
         private VendorDto MapToDto(Vendor vendor)

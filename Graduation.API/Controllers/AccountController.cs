@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.WebUtilities;
 using Shared.DTOs;
 using Shared.DTOs.Auth;
+using System.ComponentModel.DataAnnotations;
 using System.Text;
 
 namespace Graduation.API.Controllers
@@ -391,6 +392,162 @@ namespace Graduation.API.Controllers
                     roles = roles
                 }
             });
+        }
+        // ADD THESE METHODS TO YOUR EXISTING AccountController.cs
+
+        /// <summary>
+        /// Request password reset email
+        /// </summary>
+        [EnableRateLimiting("auth")]
+        [HttpPost("forgot-password")]
+        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
+        {
+            var user = await _userManager.FindByEmailAsync(dto.Email);
+
+            // Don't reveal if user exists or not (security best practice)
+            if (user == null)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    message = "If an account exists with that email, a password reset link has been sent."
+                });
+            }
+
+            // Generate password reset token
+            var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
+            var encodedToken = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(resetToken));
+
+            // Build reset URL
+            var baseUrl = _configuration["AppSettings:BaseUrl"] ?? "http://localhost:5069";
+            var resetUrl = $"{baseUrl}/api/account/reset-password?email={user.Email}&token={encodedToken}";
+
+            // Send reset email
+            await _emailService.SendPasswordResetEmailAsync(user.Email!, user.FirstName, resetUrl);
+
+            return Ok(new
+            {
+                success = true,
+                message = "If an account exists with that email, a password reset link has been sent."
+            });
+        }
+
+        /// <summary>
+        /// Reset password with token
+        /// </summary>
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto dto)
+        {
+            var user = await _userManager.FindByEmailAsync(dto.Email);
+            if (user == null)
+                throw new NotFoundException("User not found");
+
+            // Decode token
+            var decodedToken = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(dto.Token));
+
+            // Reset password
+            var result = await _userManager.ResetPasswordAsync(user, decodedToken, dto.NewPassword);
+
+            if (!result.Succeeded)
+            {
+                var errors = string.Join(", ", result.Errors.Select(e => e.Description));
+                throw new BadRequestException($"Password reset failed: {errors}");
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = "Password reset successfully. You can now login with your new password."
+            });
+        }
+
+        /// <summary>
+        /// Change password (authenticated users)
+        /// </summary>
+        [HttpPost("change-password")]
+        [Authorize]
+        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
+        {
+            var userId = User.FindFirst("userId")?.Value;
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized(new ApiResponse(401, "User not authenticated"));
+
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null)
+                throw new NotFoundException("User not found");
+
+            var result = await _userManager.ChangePasswordAsync(user, dto.CurrentPassword, dto.NewPassword);
+
+            if (!result.Succeeded)
+            {
+                var errors = string.Join(", ", result.Errors.Select(e => e.Description));
+                throw new BadRequestException($"Password change failed: {errors}");
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = "Password changed successfully"
+            });
+        }
+
+        /// <summary>
+        /// Update user profile
+        /// </summary>
+        [HttpPut("profile")]
+        [Authorize]
+        public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileDto dto)
+        {
+            var userId = User.FindFirst("userId")?.Value;
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized(new ApiResponse(401, "User not authenticated"));
+
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null)
+                throw new NotFoundException("User not found");
+
+            user.FirstName = dto.FirstName;
+            user.LastName = dto.LastName;
+            user.PhoneNumber = dto.PhoneNumber;
+            user.ProfilePictureUrl = dto.ProfilePictureUrl;
+
+            var result = await _userManager.UpdateAsync(user);
+
+            if (!result.Succeeded)
+            {
+                var errors = string.Join(", ", result.Errors.Select(e => e.Description));
+                throw new BadRequestException($"Profile update failed: {errors}");
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = "Profile updated successfully",
+                data = new
+                {
+                    id = user.Id,
+                    email = user.Email,
+                    firstName = user.FirstName,
+                    lastName = user.LastName,
+                    phoneNumber = user.PhoneNumber,
+                    profilePictureUrl = user.ProfilePictureUrl
+                }
+            });
+        }
+
+        // DTO for UpdateProfile
+        public class UpdateProfileDto
+        {
+            [Required]
+            public string FirstName { get; set; } = string.Empty;
+
+            [Required]
+            public string LastName { get; set; } = string.Empty;
+
+            [Phone]
+            public string? PhoneNumber { get; set; }
+
+            public string? ProfilePictureUrl { get; set; }
         }
     }
 

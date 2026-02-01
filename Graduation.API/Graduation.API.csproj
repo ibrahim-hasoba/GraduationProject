@@ -30,6 +30,7 @@
 
 		<!-- Security -->
 		<PackageReference Include="HtmlSanitizer" Version="8.1.870" />
+		
 	</ItemGroup>
 
 	<ItemGroup>

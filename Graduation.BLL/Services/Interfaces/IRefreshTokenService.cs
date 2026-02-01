@@ -9,7 +9,7 @@ namespace Graduation.BLL.Services.Interfaces
     {
         Task<RefreshToken> GenerateRefreshTokenAsync(string userId, string ipAddress);
         Task<RefreshToken?> GetRefreshTokenAsync(string token);
-        Task<bool> ValidateRefreshTokenAsync(string token);
+        Task<bool> ValidateRefreshTokenAsync(string token, string? userId = null);
         Task RevokeTokenAsync(string token, string ipAddress, string? replacedByToken = null);
         Task RevokeAllUserTokensAsync(string userId, string ipAddress);
         Task RemoveExpiredTokensAsync();

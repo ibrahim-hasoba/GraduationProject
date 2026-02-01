@@ -38,20 +38,20 @@ namespace Graduation.API
 
             try
             {
-                Log.Information("Starting Egyptian Marketplace API");
+                Log.Information("Starting Egyptian Marketplace API (.NET 10)");
 
                 var builder = WebApplication.CreateBuilder(args);
 
                 // Use Serilog
                 builder.Host.UseSerilog();
 
-                //// Rate Limiting Configuration (BEFORE AddControllers)
+                // CRITICAL FIX: Enable Rate Limiting
                 //builder.Services.AddRateLimiter(options =>
                 //{
                 //    // Global rate limit: 100 requests per minute per user/IP
                 //    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
                 //    {
-                //        var username = context.User.Identity?.Name ?? context.Request.Headers.Host.ToString();
+                //        var username = context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
 
                 //        return RateLimitPartition.GetFixedWindowLimiter(
                 //            partitionKey: username,
@@ -96,9 +96,58 @@ namespace Graduation.API
 
                 // Add services
                 builder.Services.AddControllers();
-                builder.Services.AddOpenApi();
-                builder.Services.AddSwaggerGen();
                 builder.Services.AddEndpointsApiExplorer();
+
+                // Configure Swagger with file upload support (.NET 10 compatible)
+                //builder.Services.AddSwaggerGen(options =>
+                //{
+                //    options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+                //    {
+                //        Title = "Egyptian Marketplace API",
+                //        Version = "v1",
+                //        Description = "E-commerce API for Egyptian marketplace with vendor support (.NET 10)"
+                //    });
+
+                //    // Add JWT Authentication to Swagger
+                //    options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+                //    {
+                //        Name = "Authorization",
+                //        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+                //        Scheme = "Bearer",
+                //        BearerFormat = "JWT",
+                //        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+                //        Description = "JWT Authorization header using the Bearer scheme. Enter your token in the text input below."
+                //    });
+
+                //    options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+                //    {
+                //        {
+                //            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+                //            {
+                //                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                //                {
+                //                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                //                    Id = "Bearer"
+                //                }
+                //            },
+                //            Array.Empty<string>()
+                //        }
+                //    });
+
+                //    // Enable file upload support in Swagger
+                //    options.MapType<IFormFile>(() => new Microsoft.OpenApi.Models.OpenApiSchema
+                //    {
+                //        Type = "string",
+                //        Format = "binary"
+                //    });
+                //});
+
+                // NEW: Add Health Checks
+                //builder.Services.AddHealthChecks()
+                //    .AddDbContextCheck<DatabaseContext>("database")
+                //    .AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy());
+
+
 
                 // Database Configuration
                 builder.Services.AddDbContext<DatabaseContext>(options =>
@@ -169,8 +218,8 @@ namespace Graduation.API
                 builder.Services.AddScoped<IReviewService, ReviewService>();
                 builder.Services.AddScoped<IAdminService, AdminService>();
                 builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
-                builder.Services.AddEndpointsApiExplorer();
-                //builder.Services.AddSwaggerDocumentation();
+                builder.Services.AddScoped<IImageService, ImageService>(); // NEW
+
                 // Register Facebook Auth Service with HttpClient
                 builder.Services.AddHttpClient<IFacebookAuthService, FacebookAuthService>();
 
@@ -196,8 +245,8 @@ namespace Graduation.API
                     options.InvalidModelStateResponseFactory = actionContext =>
                     {
                         var errors = actionContext.ModelState
-                            .Where(m => m.Value.Errors.Count > 0)
-                            .SelectMany(m => m.Value.Errors)
+                            .Where(m => m.Value!.Errors.Count > 0)
+                            .SelectMany(m => m.Value!.Errors)
                             .Select(e => e.ErrorMessage)
                             .ToArray();
 
@@ -223,6 +272,16 @@ namespace Graduation.API
                 // Configure middleware pipeline
                 app.UseMiddleware<ExceptionMiddleware>();
 
+                // NEW: Security Headers
+                app.Use(async (context, next) =>
+                {
+                    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+                    context.Response.Headers.Append("X-Frame-Options", "DENY");
+                    context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
+                    context.Response.Headers.Append("Referrer-Policy", "no-referrer");
+                    await next();
+                });
+
                 if (app.Environment.IsDevelopment())
                 {
                     app.UseSwagger();
@@ -232,12 +291,22 @@ namespace Graduation.API
                     });
                 }
 
+                // NEW: Map Health Checks
+                //app.MapHealthChecks("/health");
+                //app.MapHealthChecks("/health/ready");
+
                 app.UseHttpsRedirection();
-                app.UseCors("AllowSpecificOrigins");  // Changed from "AllowAll"
-                //app.UseRateLimiter();
+
+                // Enable static files for image uploads
+                app.UseStaticFiles();
+
+                app.UseCors("AllowSpecificOrigins");
+                //app.UseRateLimiter(); // ENABLED
                 app.UseAuthentication();
                 app.UseAuthorization();
                 app.MapControllers();
+
+                Log.Information("API started successfully on {Environment}", app.Environment.EnvironmentName);
 
                 app.Run();
             }
@@ -247,7 +316,7 @@ namespace Graduation.API
             }
             finally
             {
-                Log.CloseAndFlush();
+                await Log.CloseAndFlushAsync();
             }
         }
 
